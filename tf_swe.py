@@ -1,18 +1,8 @@
-
-# coding: utf-8
-
-# In[1]:
-
-
 import numpy as np
 import tensorflow as tf
 import os
 from op import *
-from utils import *
-
-
-# In[2]:
-
+#from utils import *
 
 def get_inner_conservation(H_init, U_init, V_init):
     shape = H_init.shape
@@ -27,9 +17,6 @@ def get_inner_conservation(H_init, U_init, V_init):
     tot_inner_h = np.sum(H_init*inner_op)
     tot_inner_energy = np.sum((0.5*(U_init**2) + 0.5*(V_init**2) + g*H_init)*inner_op)
     return tot_inner_energy, tot_inner_h
-
-
-# In[3]:
 
 
 n = 64
@@ -49,16 +36,9 @@ for i in range(2,4):
 tot_en, tot_h = get_inner_conservation(H_init, U_init, V_init)
 print(tot_en)
 
-# In[45]:
-
-
 H  =tf.placeholder(tf.float64, shape=(n+2,n+2))
 U  =tf.placeholder(tf.float64, shape=(n+2,n+2))
 V  =tf.placeholder(tf.float64, shape=(n+2,n+2))
-
-
-# In[46]:
-
 
 H_left = copy_2nd_to_1st_left(H)
 H_right = copy_2nd_to_1st_right(H)
@@ -103,14 +83,8 @@ en_loss = tf.square(tf.reduce_sum(get_circle_inner(0.5*tf.square(U_next) + 0.5*t
 h_loss = tf.square(tf.reduce_sum(get_circle_inner(H_next)) - tot_h)
 loss = en_loss + h_loss
                     
-# In[47]:
-
 #the optimize item is energy conservation
 optimizer = tf.train.AdamOptimizer(3e-4, beta1=0.5, beta2=0.9).minimize(loss)
-
-
-# In[6]:
-
 
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
@@ -141,10 +115,4 @@ with tf.Session() as sess:
                     print(var.eval())
         """
         
-
-
-# In[9]:
-
-
-draw_3D(result_H[1990], 64)
-
+#draw_3D(result_H[1990], 64)
