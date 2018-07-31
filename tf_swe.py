@@ -3,23 +3,21 @@ import tensorflow as tf
 import os
 from op import *
 #from utils import *
+from sys import exit
 
 def get_inner_conservation(H_init, U_init, V_init):
     shape = H_init.shape
     inner_op = np.ones(shape)
     g=9.8
-    for i in range(shape[0]):
-        inner_op[i,0] = 0
-        inner_op[i,shape[1]-1] = 0
-    for i in range(shape[1]):
-        inner_op[0,i] = 0
-        inner_op[shape[0]-1,i] = 0
+    inner_op[:, 0]=0
+    inner_op[:, shape[1]-1]=0
+    inner_op[0, :]=0
+    inner_op[shape[0]-1, :]=0  
     tot_inner_h = np.sum(H_init*inner_op)
     tot_inner_energy = np.sum((0.5*(U_init**2) + 0.5*(V_init**2) + g*H_init)*inner_op)
     return tot_inner_energy, tot_inner_h
-
-
-n = 64
+#n = 64
+n = 7 
 H_init = np.ones([n+2,n+2], dtype=np.float64)
 U_init = np.zeros([n+2,n+2], dtype=np.float64)
 V_init = np.zeros([n+2,n+2], dtype=np.float64)
@@ -31,11 +29,8 @@ tot_step = 4000
 for i in range(2,4):
     for j in range(2,4):
         H_init[i,j]  = H_init[i,j] + 0.2
-
 #calculate total  energy 
 tot_en, tot_h = get_inner_conservation(H_init, U_init, V_init)
-print(tot_en)
-
 H  =tf.placeholder(tf.float64, shape=(n+2,n+2))
 U  =tf.placeholder(tf.float64, shape=(n+2,n+2))
 V  =tf.placeholder(tf.float64, shape=(n+2,n+2))
@@ -45,7 +40,6 @@ H_right = copy_2nd_to_1st_right(H)
 H_top = copy_2nd_to_1st_top(H)
 H_bottom = copy_2nd_to_1st_bottom(H)
 H_inner = get_circle_inner(H)
-
 H_ = corner_regulation(H_left + H_right + H_top + H_bottom + H_inner)
 
 U_top = -copy_2nd_to_1st_top(U)
@@ -60,15 +54,14 @@ V_inner = get_lr_inner(V)
 V_ = V_left + V_right + V_inner
 V_ = tb_to_zero(V_)
 
+Hx = AXF(H_) - dt/2*DXF(U_)
+Hy = AYF(H_) - dt/(2)*DYF(V_)
 
-Hx = xplus_forward(H_)/2 - dt/(2*dx)*xsub_forward(U_) 
-Hy = yplus_forward(H_)/2 - dt/(2*dy)*ysub_forward(V_)
+Ux = AXF(U_) - dt/(2)* DXF(tf.divide(tf.square(U_), H_) + g/2*tf.square(H_)) 
+Uy = AYF(U_) - dt/(2)* DYF(tf.divide(tf.multiply(U_,V_), H_))  
 
-Ux = xplus_forward(U_)/2 - dt/(2*dx)* xsub_forward(tf.divide(tf.square(U_), H_) + g/2*tf.square(H_)) 
-Uy = yplus_forward(U_)/2 - dt/(2*dy)* ysub_forward(tf.divide(tf.multiply(U_,V_), H_))  
-
-Vx = xplus_forward(V_)/2 - dt/(2*dx)* xsub_forward(tf.divide(tf.multiply(U_,V_),H_ ))
-Vy = yplus_forward(V_)/2 - dt/(2*dy)* ysub_forward(tf.divide(tf.square(V_), H_ ) + g/2*tf.square(H_)) 
+Vx = AXF(V_) - dt/(2)* DXF(tf.divide(tf.multiply(U_,V_),H_ ))
+Vy = AYF(V_) - dt/(2)* DYF(tf.divide(tf.square(V_), H_ ) + g/2*tf.square(H_)) 
 
 dH = (dt/dx)* xsub_backward(Ux) + (dt/dy)* ysub_backward(Vy)
 dU = (dt/dx)* xsub_backward(tf.divide(tf.square(Ux),Hx) + g/2*tf.square(Hx)) +        (dt/dy)* ysub_backward(tf.divide(tf.multiply(Vy,Uy), Hy))

@@ -2,6 +2,9 @@ import tensorflow as tf
 import numpy as np
 import os
 
+dx = 1000.0
+dy = 1000.0
+
 def copy_2nd_to_1st_left(var):
     shape = var.shape
     op = np.zeros(shape)
@@ -33,13 +36,11 @@ def copy_2nd_to_1st_bottom(var):
 def get_circle_inner(var):
     shape = var.shape
     op = np.ones(shape)
-    for i in range(shape[0]):
-        op[i,0] = 0
-        op[i,shape[1]-1] = 0
-    for i in range(shape[1]):
-        op[0,i] = 0
-        op[shape[0]-1,i] = 0
-    #op = tf.constant(op)
+    op[:, 0]=0
+    op[:, shape[1]-1]=0
+    op[0, :]=0
+    op[shape[0]-1, :]=0 
+    op = tf.constant(op)
     return tf.multiply(var, op)
 
 def get_lr_inner(var):
@@ -123,12 +124,12 @@ def expand_surround(var):
 # In[43]:
 
 
-def make_kernel(a):
+def make_kernel(a, b=1):
     """Transform a 2D array into a convolution kernel"""
-    a = np.asarray(a)
-    a = a.reshape(list(a.shape) + [1,1])
+    c = np.asarray(a)/b
+    c = c.reshape(list(c.shape) + [1,1])
     with tf.name_scope('kernel'):
-        var = tf.Variable(a, dtype=tf.float64)
+        var = tf.Variable(c, dtype=tf.float64)
     return var
 
 def simple_conv(x, k):
@@ -137,9 +138,9 @@ def simple_conv(x, k):
     y = tf.nn.depthwise_conv2d(x, k, [1, 1, 1, 1], padding='VALID')
     return y[0, :, :, 0]
 
-def xplus_forward(x, expand_type=None):
+def AXF(x, expand_type=None):
     kernel = make_kernel([[0.0, 1.0],
-                           [0.0, 1.0]])
+                          [0.0, 1.0]],2)
     res = simple_conv(x, kernel)
     if expand_type == 'left_top':
         res = expand_left(res)
@@ -149,9 +150,9 @@ def xplus_forward(x, expand_type=None):
         res = expand_bottom(res)
     return res
 
-def xsub_forward(x, expand_type=None):
+def DXF(x, expand_type=None):
     kernel = make_kernel([[0.0, -1.0],
-                           [0.0, 1.0]])
+                           [0.0, 1.0]],dx)
     res = simple_conv(x, kernel)
     if expand_type == 'left_top':
         res = expand_left(res)
@@ -161,9 +162,9 @@ def xsub_forward(x, expand_type=None):
         res = expand_bottom(res)
     return res
 
-def yplus_forward(y, expand_type=None):
+def AYF(y, expand_type=None):
     kernel = make_kernel([[0.0, 0.0],
-                           [1.0, 1.0]])
+                           [1.0, 1.0]],2)
     res = simple_conv(y, kernel)
     if expand_type == 'left_top':
         res = expand_left(res)
@@ -173,9 +174,9 @@ def yplus_forward(y, expand_type=None):
         res = expand_bottom(res)
     return res
 
-def ysub_forward(y, expand_type=None):
+def DYF(y, expand_type=None):
     kernel = make_kernel([[0.0, 0.0],
-                           [-1.0, 1.0]])
+                           [-1.0, 1.0]],dy)
     res = simple_conv(y, kernel)
     if expand_type == 'left_top':
         res = expand_left(res)
@@ -187,9 +188,9 @@ def ysub_forward(y, expand_type=None):
 
 
 
-def xplus_backward(x, expand_type=None):
-    kernel = make_kernel([[0.0, 1.0],
-                           [0.0, 1.0]])
+def AXB(x, expand_type=None):
+    kernel = make_kernel([[1.0, 0.0],
+                           [1.0, 0.0]],2)
     res = simple_conv(x, kernel)
     if expand_type == 'left_top':
         res = expand_left(res)
@@ -211,7 +212,7 @@ def xsub_backward(x, expand_type=None):
         res = expand_bottom(res)
     return res
 
-def yplus_backward(y, expand_type=None):
+def AYB(y, expand_type=None):
     kernel = make_kernel([[1.0, 1.0],
                            [0.0, 0.0]])
     res = simple_conv(y, kernel)
