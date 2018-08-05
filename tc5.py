@@ -15,6 +15,8 @@ import numpy as np
 import math as math
 from scipy.spatial import cKDTree 
 from scipy.stats import mode
+import matplotlib.pyplot as plt
+import matplotlib.tri as tri
 
 def setupT5(nfile):
     np_x = nfile[:,0]
@@ -267,7 +269,8 @@ with graph.as_default():
 #=============================Start Session=============================
 with tf.Session(graph=graph) as sess:
     # size of RBF-FD stencil
-    np_fdsize= 5
+    #np_fdsize= 5
+    np_fdsize= 31 
     # ending time, needs to be in days
     np_tend  = 1
     # power of Laplacian, L^order
@@ -299,10 +302,11 @@ with tf.Session(graph=graph) as sess:
     # Initial condition for the geopotential field (m^2/s^2).
     np_gh0   = np_g*5960                               
     # Set to plt=1 if you want to plot results at different time-steps.
-    np_dsply = 1 
+    np_dsply = 50 
     np_plt   = 1
 
-    np_file =np.loadtxt("md/md002.00009")
+    #np_file =np.loadtxt("md/md002.00009")
+    np_file =np.loadtxt("md/md059.03600")
     # Setup tc5 case
     np_x, np_y, np_z, np_la, np_th, np_r, np_p_u, \
         np_p_v, np_p_w, np_f, np_ghm = setupT5(np_file) 
@@ -321,6 +325,14 @@ with tf.Session(graph=graph) as sess:
     np_gradghm[:,2] = np.dot(np_DPz, np_ghm)/np_a;
 
     sess.run(init)
+
+    # plot the results
+    fig = plt.figure()
+    ax = fig.add_subplot(1,1,1)
+    #ax.scatter(np_la, np_th)
+    plt.ion() 
+    plt.show()
+
 
     feed_dict={ x       : np_x       ,\
                 y       : np_y       ,\
@@ -341,11 +353,11 @@ with tf.Session(graph=graph) as sess:
                 p_w     : np_p_w     ,\
                 dt      : np_dt      } 
 
-    #for nt in range(np_tend*24*3600):
-    for nt in range(900):
+    for nt in range(np_tend*24*3600):
+    #for nt in range(900):
+    #for nt in range(900):
+        #print("\n----------------------step:",nt+1,"-----------------------------\n")
         [H_next] = sess.run([Res], feed_dict= feed_dict)
-        print("\n----------------------step:",nt+1,"-----------------------------\n")
-        print(H_next)
         feed_dict={ x       : np_x       ,\
                     y       : np_y       ,\
                     z       : np_z       ,\
@@ -364,6 +376,21 @@ with tf.Session(graph=graph) as sess:
                	    p_v     : np_p_v     ,\
                	    p_w     : np_p_w     ,\
                	    dt      : np_dt      } 
+
+        #print(H_next)
+        if np_plt == 1:
+            #if nt % np_dsply ==0:
+            if nt % np_dsply  ==0:
+                value = (H_next[:,3]+np_gh0)/np_g
+                #print(z)
+                ax.cla()
+                ax.tricontour(np_la, np_th, value, 14, linewidths=0.5, colors='k')
+                cntr  = ax.tricontourf(np_la, np_th, value, 14, cmap="RdBu_r")
+                #fig.colorbar(cntr, ax=ax)
+                #ax.plot(np_la, np_th, 'ko', ms=3)
+                ax.axis((-np.pi/2, np.pi/2, -np.pi/2, np.pi/2))
+                ax.set_title('tricontour (%d points)' % nt)
+                plt.pause(0.01)
 
 sess.close()
 #=============================End=======================================
