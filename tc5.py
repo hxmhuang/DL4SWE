@@ -13,10 +13,23 @@
 import tensorflow as tf
 import numpy as np
 import math as math
-from scipy.spatial import cKDTree 
-from scipy.stats import mode
 import matplotlib.pyplot as plt
 import matplotlib.tri as tri
+from scipy.spatial import cKDTree 
+from tensorflow.python.client import timeline
+
+def tic():
+    #Homemade version of matlab tic and toc functions
+    import time
+    global startTime_for_tictoc
+    startTime_for_tictoc = time.time()
+
+def toc():
+    import time
+    if 'startTime_for_tictoc' in globals():
+        print("Elapsed time is " + str(time.time() - startTime_for_tictoc) + " seconds.")
+    else:
+        print("Toc: start time not set")
 
 def setupT5(nfile):
     np_x = nfile[:,0]
@@ -79,8 +92,8 @@ def rbfmatrix_fd_hyper(np_file, np_ps_u, np_ps_v, np_ps_w, np_ep, np_fdsize, np_
     weightsL  =  np.zeros(np_N * np_fdsize, dtype=np.float64)
 
     np_imat   =  np.zeros([1,3], dtype=np.float64)
-    np_ind_i  =  np.zeros(np_N * np_fdsize, dtype=np.float64)
-    np_ind_j  =  np.zeros(np_N * np_fdsize, dtype=np.float64)
+    np_ind_i  =  np.zeros(np_N * np_fdsize, dtype=np.int64)
+    np_ind_j  =  np.zeros(np_N * np_fdsize, dtype=np.int64)
    
     np_A      =  np.ones((np_fdsize+1, np_fdsize+1), dtype=np.float64) 
     np_A[np_fdsize,np_fdsize] = 0
@@ -134,8 +147,10 @@ def rbfmatrix_fd_hyper(np_file, np_ps_u, np_ps_v, np_ps_w, np_ep, np_fdsize, np_
             np_DPz[i,j] = weightsDz[i*np_fdsize+count] 
             np_L[i,j]   = weightsL[i*np_fdsize+count] 
             count    = count + 1
+    np_indices=np.concatenate((np.expand_dims(np_ind_i, 1), np.expand_dims(np_ind_j, 1)), 1)
+    #print('np_indices=\n', np_indices)
     
-    return np_DPx, np_DPy, np_DPz, np_L
+    return np_DPx, np_DPy, np_DPz, np_L, np_indices, weightsDx, weightsDy, weightsDz, weightsL
 
 def rbf(ep, rd2):
     return np.exp(-ep**2 * rd2)
@@ -195,9 +210,9 @@ def computeInitialCondition(nfile):
 def evalCartRhs_fd(x,y,z,f,g,a,gh0,ghm,gradghm,H,DPx,DPy,DPz,L,p_u,p_v,p_w):
     # Compute the (projected) Cartesian derivatives applied to the velocity
     # and geopotential.
-    Tx = tf.matmul(DPx,H)/a 
-    Ty = tf.matmul(DPy,H)/a 
-    Tz = tf.matmul(DPz,H)/a 
+    Tx =tf.sparse_tensor_dense_matmul(DPx,H)/a 
+    Ty =tf.sparse_tensor_dense_matmul(DPy,H)/a 
+    Tz =tf.sparse_tensor_dense_matmul(DPz,H)/a 
 
     # This is the computation for the right hand side of the (Cartesian) 
     # momentum equations.
@@ -224,13 +239,14 @@ def evalCartRhs_fd(x,y,z,f,g,a,gh0,ghm,gradghm,H,DPx,DPy,DPz,L,p_u,p_v,p_w):
                   tf.reshape(F4,[-1,1])], 1)
     
     # Apply the hyper-viscosity, either once or twice.
-    G = F + tf.matmul(L,H);
+    G = F + tf.sparse_tensor_dense_matmul(L,H);
     return G
 
 #=============================Define Graph==============================
 graph = tf.Graph() 
 with graph.as_default():
     with tf.name_scope("Input"):
+        N       = tf.placeholder(dtype=tf.int64,   name="N")
         x       = tf.placeholder(dtype=tf.float64, name="x")
         y       = tf.placeholder(dtype=tf.float64, name="y")
         z       = tf.placeholder(dtype=tf.float64, name="z")
@@ -241,20 +257,29 @@ with graph.as_default():
         ghm     = tf.placeholder(dtype=tf.float64, name="ghm")
         gradghm = tf.placeholder(dtype=tf.float64, name="gradghm")
         H       = tf.placeholder(dtype=tf.float64, name="H")
-        DPx     = tf.placeholder(dtype=tf.float64, name="DPx")
-        DPy     = tf.placeholder(dtype=tf.float64, name="DPy")
-        DPz     = tf.placeholder(dtype=tf.float64, name="DPz")
-        L       = tf.placeholder(dtype=tf.float64, name="L")
+        indices = tf.placeholder(dtype=tf.int64, name="indices")
+        weightsDx=tf.placeholder(dtype=tf.float64, name="weightsDx")
+        weightsDy=tf.placeholder(dtype=tf.float64, name="weightsDy")
+        weightsDz=tf.placeholder(dtype=tf.float64, name="weightsDz")
+        weightsL =tf.placeholder(dtype=tf.float64, name="weightsL")
+
+        DPx     = tf.SparseTensor(indices=indices, values=weightsDx, dense_shape=[N,N])
+        DPy     = tf.SparseTensor(indices=indices, values=weightsDy, dense_shape=[N,N])
+        DPz     = tf.SparseTensor(indices=indices, values=weightsDz, dense_shape=[N,N])
+        L       = tf.SparseTensor(indices=indices, values=weightsL,  dense_shape=[N,N])
         p_u     = tf.placeholder(dtype=tf.float64, name="p_u")
         p_v     = tf.placeholder(dtype=tf.float64, name="p_v")
         p_w     = tf.placeholder(dtype=tf.float64, name="p_w")
         dt      = tf.placeholder(dtype=tf.float64, name="dt")    
-        
-        #gamma   = tf.placeholder(dtype=tf.float64,   name="gamma")    
+       
+        #gradghm1 = tf.sparse_tensor_dense_matmul(DPx,ghm)/a
+        #gradghm2 = tf.sparse_tensor_dense_matmul(DPy,ghm)/a
+        #gradghm3 = tf.sparse_tensor_dense_matmul(DPz,ghm)/a
+        #gradghm  = tf.concat((gradghm1, gradghm2, gradghm3), 1)  
+        #gradghm  = tf.concat((gradghm1, gradghm1, gradghm1), 1)  
 
         #K       = tf.get_variable("K", shape=[9,4], initializer=H)
         K1      = H
-        
         d1      = dt*evalCartRhs_fd(x,y,z,f,g,a,gh0,ghm,gradghm,K1,DPx,DPy,DPz,L,p_u,p_v,p_w)
         K2      = H + 0.5*d1;
         d2      = dt*evalCartRhs_fd(x,y,z,f,g,a,gh0,ghm,gradghm,K2,DPx,DPy,DPz,L,p_u,p_v,p_w)
@@ -284,10 +309,9 @@ with tf.Session(graph=graph) as sess:
     #amount of hyperviscosity applied, multiplies Laplacian^order
     np_gamma = -2.97e-16
     # Parameters for the mountain:
-    np_pi   = 4.0 * math.atan(1)
-    np_lam_c= -np_pi/2;
-    np_thm_c= np_pi/6;
-    np_mR   = np_pi/9;
+    np_lam_c= -np.pi/2;
+    np_thm_c= np.pi/6;
+    np_mR   = np.pi/9;
     np_hm0  = 2000.0;
     # Angle of rotation measured from the equator.
     np_alpha = 0.0
@@ -302,23 +326,26 @@ with tf.Session(graph=graph) as sess:
     # Initial condition for the geopotential field (m^2/s^2).
     np_gh0   = np_g*5960                               
     # Set to plt=1 if you want to plot results at different time-steps.
-    np_dsply = 50 
-    np_plt   = 1
+    np_dsply = 5 
+    np_plt   = 0
 
     #np_file =np.loadtxt("md/md002.00009")
     np_file =np.loadtxt("md/md059.03600")
+    np_N = len(np_file)
     # Setup tc5 case
     np_x, np_y, np_z, np_la, np_th, np_r, np_p_u, \
         np_p_v, np_p_w, np_f, np_ghm = setupT5(np_file) 
     # Compute the rbf difference matrix 
-    np_DPx, np_DPy, np_DPz, np_L = rbfmatrix_fd_hyper(np_file, np_p_u, np_p_v, np_p_w, \
-                                                  np_ep, np_fdsize, np_order, np_dim)
-    np_L = np_gamma * np_L
+    #np_DPx, np_DPy, np_DPz, np_L = rbfmatrix_fd_hyper(np_file, np_p_u, np_p_v, np_p_w, \
+    #                                              np_ep, np_fdsize, np_order, np_dim)
+    np_DPx, np_DPy, np_DPz, np_L, np_indices, np_weightsDx, np_weightsDy, np_weightsDz, np_weightsL = \
+            rbfmatrix_fd_hyper(np_file, np_p_u, np_p_v, np_p_w, np_ep, np_fdsize, np_order, np_dim)
+    np_weightsL = np_gamma * np_weightsL
     # compute the initial condition
     np_uc, np_gh, np_us = computeInitialCondition(np_file)
     np_H = np.hstack((np_uc, np_gh.reshape((len(np_uc),1))))
 
-    # Compute the projected gradient of the mountain for test case 5
+#   # Compute the projected gradient of the mountain for test case 5
     np_gradghm = np.zeros([len(np_file),3], dtype=np.float64)
     np_gradghm[:,0] = np.dot(np_DPx, np_ghm)/np_a;
     np_gradghm[:,1] = np.dot(np_DPy, np_ghm)/np_a;
@@ -333,8 +360,8 @@ with tf.Session(graph=graph) as sess:
     plt.ion() 
     plt.show()
 
-
-    feed_dict={ x       : np_x       ,\
+    feed_dict={ N       : np_N       ,\
+                x       : np_x       ,\
                 y       : np_y       ,\
                 z       : np_z       ,\
                 f       : np_f       ,\
@@ -344,40 +371,55 @@ with tf.Session(graph=graph) as sess:
                 ghm     : np_ghm     ,\
                 gradghm : np_gradghm ,\
                 H       : np_H	  ,\
-                DPx     : np_DPx     ,\
-                DPy     : np_DPy     ,\
-                DPz     : np_DPz     ,\
-                L       : np_L       ,\
+                indices : np_indices, \
+                weightsDx: np_weightsDx, \
+                weightsDy: np_weightsDy, \
+                weightsDz: np_weightsDz, \
+                weightsL : np_weightsL, \
                 p_u     : np_p_u     ,\
                 p_v     : np_p_v     ,\
                 p_w     : np_p_w     ,\
                 dt      : np_dt      } 
+   
+    tic()
+    #for nt in range(np_tend*24*3600):
+    #for nt in range(900):
+    for nt in range(10):
 
-    for nt in range(np_tend*24*3600):
-    #for nt in range(900):
-    #for nt in range(900):
+        options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+        run_metadata = tf.RunMetadata()
+
         #print("\n----------------------step:",nt+1,"-----------------------------\n")
-        [H_next] = sess.run([Res], feed_dict= feed_dict)
-        feed_dict={ x       : np_x       ,\
-                    y       : np_y       ,\
-                    z       : np_z       ,\
-               	    f       : np_f       ,\
-               	    g       : np_g       ,\
-               	    a       : np_a       ,\
-               	    gh0     : np_gh0     ,\
-               	    ghm     : np_ghm     ,\
-               	    gradghm : np_gradghm ,\
-               	    H       : H_next ,\
-                    DPx     : np_DPx     ,\
-               	    DPy     : np_DPy     ,\
-               	    DPz     : np_DPz     ,\
-               	    L       : np_L       ,\
-               	    p_u     : np_p_u     ,\
-               	    p_v     : np_p_v     ,\
-               	    p_w     : np_p_w     ,\
-               	    dt      : np_dt      } 
-
+        [H_next] = sess.run([Res], feed_dict= feed_dict, options=options, run_metadata=run_metadata)
+        #[H_next] = sess.run([Res], feed_dict= feed_dict, options=options, run_metadata=run_metadata)
+        feed_dict={ N       : np_N       ,\
+                x       : np_x       ,\
+                y       : np_y       ,\
+                z       : np_z       ,\
+                f       : np_f       ,\
+                g       : np_g       ,\
+                a       : np_a       ,\
+                gh0     : np_gh0     ,\
+                ghm     : np_ghm     ,\
+                gradghm : np_gradghm ,\
+                H       : H_next,\
+                indices : np_indices, \
+                weightsDx: np_weightsDx, \
+                weightsDy: np_weightsDy, \
+                weightsDz: np_weightsDz, \
+                weightsL : np_weightsL, \
+                p_u     : np_p_u     ,\
+                p_v     : np_p_v     ,\
+                p_w     : np_p_w     ,\
+                dt      : np_dt      }
+ 
         #print(H_next)
+        # Create the Timeline object, and write it to a json file
+        fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+        chrome_trace = fetched_timeline.generate_chrome_trace_format()
+        #with open('timeline_01.json', 'w') as f:
+        #    f.write(chrome_trace) 
+        #f.close()
         if np_plt == 1:
             #if nt % np_dsply ==0:
             if nt % np_dsply  ==0:
@@ -391,6 +433,6 @@ with tf.Session(graph=graph) as sess:
                 ax.axis((-np.pi/2, np.pi/2, -np.pi/2, np.pi/2))
                 ax.set_title('tricontour (%d points)' % nt)
                 plt.pause(0.01)
-
+    toc()
 sess.close()
 #=============================End=======================================
