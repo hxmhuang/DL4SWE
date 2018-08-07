@@ -17,15 +17,14 @@ import matplotlib.pyplot as plt
 import matplotlib.tri as tri
 from scipy.spatial import cKDTree 
 from tensorflow.python.client import timeline
+import time
 
 def tic():
     #Homemade version of matlab tic and toc functions
-    import time
     global startTime_for_tictoc
     startTime_for_tictoc = time.time()
 
 def toc():
-    import time
     if 'startTime_for_tictoc' in globals():
         print("Elapsed time is " + str(time.time() - startTime_for_tictoc) + " seconds.")
     else:
@@ -210,28 +209,34 @@ def computeInitialCondition(nfile):
 def evalCartRhs_fd(x,y,z,f,g,a,gh0,ghm,gradghm,H,DPx,DPy,DPz,L,p_u,p_v,p_w):
     # Compute the (projected) Cartesian derivatives applied to the velocity
     # and geopotential.
+    tic()
     Tx =tf.sparse_tensor_dense_matmul(DPx,H)/a 
     Ty =tf.sparse_tensor_dense_matmul(DPy,H)/a 
     Tz =tf.sparse_tensor_dense_matmul(DPz,H)/a 
-
+    toc()
     # This is the computation for the right hand side of the (Cartesian) 
     # momentum equations.
+    tic()
     p = -(H[:,0]*Tx[:,0] + H[:,1]*Ty[:,0] + H[:,2]*Tz[:,0] + f*(y*H[:,2] - z*H[:,1]) + Tx[:,3])
     q = -(H[:,0]*Tx[:,1] + H[:,1]*Ty[:,1] + H[:,2]*Tz[:,1] + f*(z*H[:,0] - x*H[:,2]) + Ty[:,3])
     s = -(H[:,0]*Tx[:,2] + H[:,1]*Ty[:,2] + H[:,2]*Tz[:,2] + f*(x*H[:,1] - y*H[:,0]) + Tz[:,3])
-
+    toc()
     # Project the momentum equations onto the surface of the sphere.
+    tic()
     F1 = p_u[:,0]*p + p_u[:,1]*q + p_u[:,2]*s;
     F2 = p_v[:,0]*p + p_v[:,1]*q + p_v[:,2]*s;
     F3 = p_w[:,0]*p + p_w[:,1]*q + p_w[:,2]*s;
+    toc()
 
     # Right-hand side for the geopotential (Does not need to be projected, this
     # has already been accounted for in the DPx, DPy, and DPz operators for
     # this equation).
+    tic()
     F4 = -( H[:,0]*(Tx[:,3] - gradghm[:,0]) + \
             H[:,1]*(Ty[:,3] - gradghm[:,1]) + \
             H[:,2]*(Tz[:,3] - gradghm[:,2]) + \
            (H[:,3]+gh0-ghm)*(Tx[:,0] + Ty[:,1] + Tz[:,2]))
+    toc()
     
     F = tf.concat([tf.reshape(F1,[-1,1]), \
                   tf.reshape(F2,[-1,1]), \
