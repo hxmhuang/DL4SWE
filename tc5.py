@@ -226,7 +226,9 @@ ep    = 2.0
 # time step, needs to be in seconds
 dt    = 900.0
 #amount of hyperviscosity applied, multiplies Laplacian^order
-gamma = -2.97e-16
+#gamma = -2.97e-16
+gamma = -2.97e-15
+#gamma =0 
 # Parameters for the mountain:
 lam_c= -np.pi/2;
 thm_c= np.pi/6;
@@ -245,7 +247,7 @@ g     = 9.80616
 gh0   = g*5960
 # Set to nplt=1 if you want to plot results at different time-steps.
 ndsply = 5
-nplt   = 0
+nplt   = 1
 
 #nfile =np.loadtxt("md/md002.00009")
 nfile =np.loadtxt("md/md059.03600")
@@ -259,6 +261,14 @@ indices, weightsDx, weightsDy, weightsDz, weightsL =\
 weightsL = gamma * weightsL
 
 uc, gh, us = computeInitialCondition(nfile)
+
+# Compute the inner energy. Note that gh is negative
+#tot_inner_energy = np.sum((0.5*(uc**2) - gh))
+tot_inner_energy = np.sum(0.5*(uc**2) -gh)
+#tot_mass         = np.sum( - gh))
+print("Total inner energy=",tot_inner_energy)
+print("Total dynamic energy=", np.sum(0.5*(uc**2)))
+print("Total potential energy=", np.sum(-gh))
 
 #=============================Define Graph=============================
 graph = tf.Graph()
@@ -274,14 +284,16 @@ with graph.as_default():
         gh0     = tf.constant(gh0, dtype=tf.float64, name="gh0")
         ghm     = tf.constant(ghm, dtype=tf.float64, name="ghm")
         indices = tf.constant(indices, dtype=tf.int64, name="indices")
-        weightsDx=tf.constant(weightsDx, dtype=tf.float64, name="weightsDx")
-        weightsDy=tf.constant(weightsDy, dtype=tf.float64, name="weightsDy")
-        weightsDz=tf.constant(weightsDz, dtype=tf.float64, name="weightsDz")
-        weightsL =tf.constant(weightsL, dtype=tf.float64, name="weightsL")
+        weightsDx=tf.Variable(weightsDx, dtype=tf.float64, trainable=True, name="weightsDx")
+        weightsDy=tf.Variable(weightsDy, dtype=tf.float64, trainable=True,name="weightsDy")
+        weightsDz=tf.Variable(weightsDz, dtype=tf.float64, trainable=True,name="weightsDz")
+        weightsL =tf.Variable(weightsL, dtype=tf.float64, trainable=False,name="weightsL")
         p_u     = tf.constant(p_u, dtype=tf.float64, name="p_u")
         p_v     = tf.constant(p_v, dtype=tf.float64, name="p_v")
         p_w     = tf.constant(p_w,dtype=tf.float64, name="p_w")
         dt      = tf.constant(dt, dtype=tf.float64, name="dt")
+        #dt      = tf.Variable(dt, dtype=tf.float64, name="dt")
+        tot_en  = tf.constant(tot_inner_energy, dtype=tf.float64, name="energy")
 
         DPx     = tf.SparseTensor(indices=indices, values=weightsDx, dense_shape=[N,N])
         DPy     = tf.SparseTensor(indices=indices, values=weightsDy, dense_shape=[N,N])
@@ -320,24 +332,45 @@ with graph.as_default():
         
         value = (H_next+gh0)/g
 
+        loss = (tf.reduce_sum(0.5*tf.square(U_next) - H_next) - tot_en)/tot_en
+        #the optimize item is energy conservation
+        # Parameters for md0009
+        #optimizer = tf.train.AdamOptimizer(learning_rate=1e-7, beta1=0.9, beta2=0.999, epsilon=1e-5).minimize(loss)
+        # Parameters for md3600
+        #optimizer = tf.train.AdamOptimizer(learning_rate=1e-7, beta1=0.9, beta2=0.999999, epsilon=1e-8).minimize(loss)
+        # Parameters for md3600
+        #optimizer = tf.train.AdamOptimizer(learning_rate=1e-13, beta1=0.9, beta2=0.999, epsilon=1e-5).minimize(loss)
+        optimizer = tf.train.AdamOptimizer(learning_rate=1e-13).minimize(loss)
+
         init = tf.global_variables_initializer()
+
 #=============================Start Session=============================
 with tf.Session(graph=graph) as sess:
     sess.run(init)
 
     feed_dict={ U: uc, H: gh}
+    feed_dict_train={ U: uc, H: gh}
+    feed_dict_predict={ U: uc, H: gh}
     
     tic()
+
     #for nt in range(tend*24*3600):
-    for nt in range(1000):
+    for nt in range(100):
         #print("========Step:",nt)
-        [U_,H_,value_] = sess.run([U_next, H_next, value], feed_dict= feed_dict)
+        for train_step in range(2):
+            [optimizer_train,loss_train,U_train,H_train,value_train] = sess.run([optimizer, loss, U_next, H_next, value], feed_dict= feed_dict_train)
+            #feed_dict_train={ U: U_train, H: H_train}
+            feed_dict_train={ U: uc, H: gh}
+            #print("\t>>>train:",train_step, "\tloss_train=",loss_train)
         
-        #print("value_=\n",value_)
-        #print("H_=\n",H_)
-        #print("H_=\n",H_)
+        #[loss_predict,U_predict,H_predict,value_] = sess.run([loss, U_next, H_next, value], feed_dict= feed_dict)
+        [loss_predict,U_predict,H_predict,value_predict] = sess.run([loss, U_next, H_next, value], feed_dict= feed_dict_predict)
+        feed_dict_predict={ U: U_predict, H: H_predict}
+        feed_dict_train=feed_dict_predict
+
+        t_energy = np.sum(0.5*(U_predict**2) - H_predict)
+        print("step:",nt, "\tt_energy=",t_energy, "\tloss=",loss_predict)
         
-        feed_dict={ U: U_, H: H_}
         #print(sess.run(U_next, H_next), feed_dict= feed_dict))
                         
         #print(sess.run([d2_u, d2_h], feed_dict= feed_dict))
@@ -351,8 +384,8 @@ with tf.Session(graph=graph) as sess:
         
             if nt % ndsply  ==0:
                 ax.cla()
-                ax.tricontour(la.reshape(N), th.reshape(N), value_.reshape(N), 14, linewidths=0.5, colors='k')
-                cntr  = ax.tricontourf(la.reshape(N), th.reshape(N), value_.reshape(N), 14, cmap="RdBu_r")
+                ax.tricontour(la.reshape(N), th.reshape(N), value_predict.reshape(N), 14, linewidths=0.5, colors='k')
+                cntr  = ax.tricontourf(la.reshape(N), th.reshape(N), value_predict.reshape(N), 14, cmap="RdBu_r")
                 #fig.colorbar(cntr, ax=ax)
                 #ax.plot(la, th, 'ko', ms=3)
                 ax.axis((-np.pi/2, np.pi/2, -np.pi/2, np.pi/2))

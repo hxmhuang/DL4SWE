@@ -31,6 +31,11 @@ for i in range(2,4):
         H_init[i,j]  = H_init[i,j] + 0.2
 #calculate total  energy 
 tot_en, tot_h = get_inner_conservation(H_init, U_init, V_init)
+
+print("U_init=",U_init)
+print("V_init=",V_init)
+print("H_init=",H_init)
+print("Total inner energy=",tot_en)
 H  =tf.placeholder(tf.float64, shape=(n+2,n+2))
 U  =tf.placeholder(tf.float64, shape=(n+2,n+2))
 V  =tf.placeholder(tf.float64, shape=(n+2,n+2))
@@ -90,7 +95,7 @@ with tf.Session() as sess:
     feed_dict_iter = {H:H_, U:U_, V:V_}
     
     for i in range(tot_step):
-        if i<4000:
+        if i<tot_step*0.7:
             _, loss_, H_, U_, V_ = sess.run([optimizer, loss, H_next, U_next, V_next], feed_dict=feed_dict_iter)
         else:
             loss_, H_, U_, V_ = sess.run([loss, H_next, U_next, V_next], feed_dict=feed_dict_iter)
