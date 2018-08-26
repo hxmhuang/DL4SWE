@@ -211,10 +211,19 @@ def evalCartRhs_fd(U,H,DPx,DPy,DPz,L,X,f,g,a,gh0,p_u,p_v,p_w,gradghm,dt):
     
     #return F, tf.sparse_tensor_dense_matmul(L, U)
     return F_adjust, G_adjust
+
+def computeMetric(Vel, gH):
+    energy = np.sum(0.5*(Vel**2) - gH)
+    return energy
+
+def computeMetricTensor(Vel, gH):
+    energy = tf.reduce_sum(0.5*tf.square(Vel) - gH)
+    return energy
 #=============================Define Parameters==============================      
 # size of RBF-FD stencil
 #fdsize= 5
-fdsize= 31
+#fdsize= 31
+fdsize= 31 
 # ending time, needs to be in days
 tend  = 1
 # power of Laplacian, L^order
@@ -224,7 +233,8 @@ dim   = 2
 # controls width of Gaussian RBF
 ep    = 2.0
 # time step, needs to be in seconds
-dt    = 900.0
+#dt    = 900.0
+dt    = 2000.0
 #amount of hyperviscosity applied, multiplies Laplacian^order
 #gamma = -2.97e-16
 gamma = -2.97e-15
@@ -246,11 +256,13 @@ g     = 9.80616
 # Initial condition for the geopotential field (m^2/s^2).
 gh0   = g*5960
 # Set to nplt=1 if you want to plot results at different time-steps.
-ndsply = 5
+ndsply = 1
 nplt   = 1
 
 #nfile =np.loadtxt("md/md002.00009")
-nfile =np.loadtxt("md/md059.03600")
+nfile =np.loadtxt("md/md019.00400")
+#nfile =np.loadtxt("md/md059.03600")
+#nfile =np.loadtxt("md/md164.27225")
 N = nfile.shape[0]
 # Setup tc5 case
 x, y, z, la, th, r, p_u, p_v, p_w, f, ghm = setupT5(nfile)
@@ -264,12 +276,18 @@ uc, gh, us = computeInitialCondition(nfile)
 
 # Compute the inner energy. Note that gh is negative
 #tot_inner_energy = np.sum((0.5*(uc**2) - gh))
-tot_inner_energy = np.sum(0.5*(uc**2) -gh)
+tot_inner_energy = computeMetric(uc, gh)
 #tot_mass         = np.sum( - gh))
 print("Total inner energy=",tot_inner_energy)
 print("Total dynamic energy=", np.sum(0.5*(uc**2)))
 print("Total potential energy=", np.sum(-gh))
 
+if nplt == 1:
+    fig = plt.figure()
+    ax = fig.add_subplot(1,1,1)
+    plt.ion()
+    plt.show() 
+ 
 #=============================Define Graph=============================
 graph = tf.Graph()
 with graph.as_default():
@@ -332,15 +350,23 @@ with graph.as_default():
         
         value = (H_next+gh0)/g
 
-        loss = (tf.reduce_sum(0.5*tf.square(U_next) - H_next) - tot_en)/tot_en
+        #loss = tf.abs((tot_en - tf.reduce_sum(0.5*tf.square(U_next) - H_next))/tot_en)
+        #loss = tf.square((tot_en - tf.reduce_sum(0.5*tf.square(U_next) - H_next)))
+        t_energy=computeMetricTensor(U_next, H_next)
+        delta= tf.abs(tot_en-t_energy)
+        flag = tf.cast(delta>1.0, tf.float64)
+        #loss = flag*tf.square(delta) +(1-flag) * tf.sqrt(delta)
+        #loss = flag*tf.square(delta) +(1-flag) * delta
+        #loss = delta ** 4
+        loss = tf.square(delta)
+
+        #loss = tf.square(tot_en - t_energy)
         #the optimize item is energy conservation
         # Parameters for md0009
         #optimizer = tf.train.AdamOptimizer(learning_rate=1e-7, beta1=0.9, beta2=0.999, epsilon=1e-5).minimize(loss)
         # Parameters for md3600
         #optimizer = tf.train.AdamOptimizer(learning_rate=1e-7, beta1=0.9, beta2=0.999999, epsilon=1e-8).minimize(loss)
-        # Parameters for md3600
-        #optimizer = tf.train.AdamOptimizer(learning_rate=1e-13, beta1=0.9, beta2=0.999, epsilon=1e-5).minimize(loss)
-        optimizer = tf.train.AdamOptimizer(learning_rate=1e-13).minimize(loss)
+        optimizer = tf.train.AdamOptimizer(learning_rate=4e-8).minimize(loss)
 
         init = tf.global_variables_initializer()
 
@@ -348,41 +374,35 @@ with graph.as_default():
 with tf.Session(graph=graph) as sess:
     sess.run(init)
 
-    feed_dict={ U: uc, H: gh}
     feed_dict_train={ U: uc, H: gh}
     feed_dict_predict={ U: uc, H: gh}
+    feed_dict_test={ U: uc, H: gh}
     
+   
     tic()
 
     #for nt in range(tend*24*3600):
     for nt in range(100):
-        #print("========Step:",nt)
-        for train_step in range(2):
-            [optimizer_train,loss_train,U_train,H_train,value_train] = sess.run([optimizer, loss, U_next, H_next, value], feed_dict= feed_dict_train)
-            #feed_dict_train={ U: U_train, H: H_train}
-            feed_dict_train={ U: uc, H: gh}
-            #print("\t>>>train:",train_step, "\tloss_train=",loss_train)
+        #=============Train Phase==================
+        for train_step in range(3000):
+            [optimizer_train,delta_train,loss_train,U_train,H_train,value_train] = sess.run([optimizer, delta, loss, U_next, H_next, value], feed_dict= feed_dict_train)
+            #feed_dict_train={ U: uc, H: gh}
+            print("\t>>>train:",train_step, "\tloss_train=",loss_train, "\tdelta_train=",delta_train)
+            if delta_train < 1e-10 :
+                break
         
-        #[loss_predict,U_predict,H_predict,value_] = sess.run([loss, U_next, H_next, value], feed_dict= feed_dict)
-        [loss_predict,U_predict,H_predict,value_predict] = sess.run([loss, U_next, H_next, value], feed_dict= feed_dict_predict)
+        #=============One step prediction==================
+        for train_step in range(3000):
+        [optimizer_predict,delta_predict,loss_predict,U_predict,H_predict,value_predict] = sess.run([optimizer, delta, loss, U_next, H_next, value], feed_dict= feed_dict_predict)
+        #[delta_predict,loss_predict,U_predict,H_predict,value_predict] = sess.run([delta, loss, U_next, H_next, value], feed_dict= feed_dict_predict)
         feed_dict_predict={ U: U_predict, H: H_predict}
         feed_dict_train=feed_dict_predict
 
-        t_energy = np.sum(0.5*(U_predict**2) - H_predict)
-        print("step:",nt, "\tt_energy=",t_energy, "\tloss=",loss_predict)
-        
-        #print(sess.run(U_next, H_next), feed_dict= feed_dict))
-                        
-        #print(sess.run([d2_u, d2_h], feed_dict= feed_dict))
+        t_energy = computeMetric(U_predict, H_predict)
+        print("step:",nt, "\tt_energy=",t_energy, "\tloss=",loss_predict, "\tdelta=",delta_predict)
     
         # plot the results
-        if nplt == 1:
-            fig = plt.figure()
-            ax = fig.add_subplot(1,1,1)
-            plt.ion()
-            plt.show() 
-        
-            if nt % ndsply  ==0:
+        if nplt == 1 and nt % ndsply==0:
                 ax.cla()
                 ax.tricontour(la.reshape(N), th.reshape(N), value_predict.reshape(N), 14, linewidths=0.5, colors='k')
                 cntr  = ax.tricontourf(la.reshape(N), th.reshape(N), value_predict.reshape(N), 14, cmap="RdBu_r")
@@ -393,5 +413,12 @@ with tf.Session(graph=graph) as sess:
                 plt.pause(0.01)
 
     toc()
-
+        
+    #=============Predict Phase==================
+    #for nt in range(1000):
+    #    [loss_test,U_test,H_test,value_test] = sess.run([loss, U_next, H_next, value], feed_dict= feed_dict_test)
+    #    feed_dict_test={ U: U_test, H: H_test}
+    #    t_energy = computeMetric(U_test, H_test)
+    #    print("step_test:",nt, "\tt_energy=",t_energy, "\tloss_test=",loss_test)
+ 
 sess.close()
