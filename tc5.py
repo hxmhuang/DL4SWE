@@ -145,14 +145,11 @@ def computeInitialCondition(nfile):
     z = nfile[:,2].reshape((N,1))
 
 
-    gh = - (a * omega * u0+ u0**2 / 2)*(-x*np.sin(alpha) + z*np.cos(alpha))**2
+    gh = - (a * omega * u0+ u0**2.0 / 2.0)*(-x*np.sin(alpha) + z*np.cos(alpha))**2.0
 
-   
-   
     uc= u0 * np.hstack((-y * np.cos(alpha), \
                         x*np.cos(alpha) + z*np.sin(alpha),\
                         -y*np.sin(alpha)))   
-
     # vectors for translating the field in Cartesian coordinates to a field
     # in spherical coordinates.
     c2s_u = np.hstack((-np.sin(la), -np.sin(th) * np.cos(la)))
@@ -194,6 +191,7 @@ def evalCartRhs_fd(U,H,DPx,DPy,DPz,L,X,f,g,a,gh0,p_u,p_v,p_w,gradghm,dt):
                 #F[i, j] = sum_k P[i, j, k] * RHS[i, k]        
     P  = tf.stack((p_u,p_v,p_w),axis=2)   
     F  = tf.einsum('ijk,ik->ij', P, RHS)
+
     # Right-hand side for the geopotential (Does not need to be projected, this
     # has already been accounted for in the DPx, DPy, and DPz operators for
     # this equation).
@@ -214,16 +212,47 @@ def evalCartRhs_fd(U,H,DPx,DPy,DPz,L,X,f,g,a,gh0,p_u,p_v,p_w,gradghm,dt):
 
 def computeMetric(Vel, gH):
     energy = np.sum(0.5*(Vel**2) - gH)
-    return energy
+    mass   = np.sum(-gH)
+    #energy = np.sum((Vel**2 + gH**2)*np.cos(th))
+    return energy, mass
 
 def computeMetricTensor(Vel, gH):
     energy = tf.reduce_sum(0.5*tf.square(Vel) - gH)
-    return energy
+    mass   = tf.reduce_sum(-gH)
+    #energy = tf.reduce_sum((Vel**2 + gH**2)*np.cos(th))
+    return energy, mass
+
 #=============================Define Parameters==============================      
 # size of RBF-FD stencil
-#fdsize= 5
-#fdsize= 31
-fdsize= 31 
+fdsize= 0 
+#nfile =np.loadtxt("md/md002.00009")
+#nfile =np.loadtxt("md/md019.00400")
+nfile  =np.loadtxt("md/md059.03600")
+#nfile =np.loadtxt("md/md079.06400")
+#nfile =np.loadtxt("md/md164.27225")
+N = nfile.shape[0]
+# time step, needs to be in seconds
+#dt    = 900.0
+dt    = 0.0
+#amount of hyperviscosity applied, multiplies Laplacian^order
+#gamma = -2.97e-16
+gamma = 0
+
+learning_rate = 0.0 
+beta1 = 0.0
+
+if   N == 9:
+    fdsize = 5 ; gamma = -2.97e-15 ; dt = 2000.0 ; learning_rate = 2e-6 ;  beta1 = 1e-5
+elif N == 400:
+    fdsize = 31; gamma = -2.97e-15 ; dt = 2000.0 ; learning_rate = 1e-7 ;  beta1 = 1e-5
+elif N == 3600:
+    #fdsize = 31; gamma = -2.97e-15 ; dt = 2000.0 ; learning_rate = 1e-7 ;  beta1 = 1e-5
+    fdsize = 31; gamma = -2.97e-15 ; dt = 2000.0 ; learning_rate = 1e-7 ;  beta1 = 1e-5
+elif N == 4900:
+    fdsize = 31; gamma = -2.97e-15 ; dt = 1000.0 ; learning_rate = 1e-7 ;  beta1 = 1e-5
+elif N == 6400:
+    fdsize = 31; gamma = -2.97e-16 ; dt = 1000.0 ; learning_rate = 1e-7 ;  beta1 = 1e-5
+
 # ending time, needs to be in days
 tend  = 1
 # power of Laplacian, L^order
@@ -232,12 +261,7 @@ order = 4
 dim   = 2
 # controls width of Gaussian RBF
 ep    = 2.0
-# time step, needs to be in seconds
-#dt    = 900.0
-dt    = 2000.0
-#amount of hyperviscosity applied, multiplies Laplacian^order
-#gamma = -2.97e-16
-gamma = -2.97e-15
+
 #gamma =0 
 # Parameters for the mountain:
 lam_c= -np.pi/2;
@@ -259,28 +283,26 @@ gh0   = g*5960
 ndsply = 1
 nplt   = 1
 
-#nfile =np.loadtxt("md/md002.00009")
-nfile =np.loadtxt("md/md019.00400")
-#nfile =np.loadtxt("md/md059.03600")
-#nfile =np.loadtxt("md/md164.27225")
-N = nfile.shape[0]
 # Setup tc5 case
+print(">>Setup testcase ...")
 x, y, z, la, th, r, p_u, p_v, p_w, f, ghm = setupT5(nfile)
 
+print(">>Compute RBF matrix ...")
 indices, weightsDx, weightsDy, weightsDz, weightsL =\
     rbfmatrix_fd_hyper(nfile, p_u, p_v, p_w, ep, fdsize, order, dim)
 
 weightsL = gamma * weightsL
 
+print(">>Compute initial condition ...")
 uc, gh, us = computeInitialCondition(nfile)
 
 # Compute the inner energy. Note that gh is negative
 #tot_inner_energy = np.sum((0.5*(uc**2) - gh))
-tot_inner_energy = computeMetric(uc, gh)
+tot_inner_energy, tot_mass = computeMetric(uc, gh)
 #tot_mass         = np.sum( - gh))
-print("Total inner energy=",tot_inner_energy)
-print("Total dynamic energy=", np.sum(0.5*(uc**2)))
-print("Total potential energy=", np.sum(-gh))
+print("Total inner energy=",tot_inner_energy, "\tTotal mass=",tot_mass)
+#print("Total dynamic energy=", np.sum(uc**2))
+#print("Total potential energy=", np.sum(gh**2))
 
 if nplt == 1:
     fig = plt.figure()
@@ -310,14 +332,18 @@ with graph.as_default():
         p_v     = tf.constant(p_v, dtype=tf.float64, name="p_v")
         p_w     = tf.constant(p_w,dtype=tf.float64, name="p_w")
         dt      = tf.constant(dt, dtype=tf.float64, name="dt")
+        learning_rate= tf.constant(learning_rate, dtype=tf.float64, name="learning_rate")
+        beta1   = tf.constant(beta1, dtype=tf.float64, name="beta1")
+
+
         #dt      = tf.Variable(dt, dtype=tf.float64, name="dt")
         tot_en  = tf.constant(tot_inner_energy, dtype=tf.float64, name="energy")
+        tot_ma  = tf.constant(tot_mass, dtype=tf.float64, name="mass")
 
         DPx     = tf.SparseTensor(indices=indices, values=weightsDx, dense_shape=[N,N])
         DPy     = tf.SparseTensor(indices=indices, values=weightsDy, dense_shape=[N,N])
         DPz     = tf.SparseTensor(indices=indices, values=weightsDz, dense_shape=[N,N])
         L       = tf.SparseTensor(indices=indices, values=weightsL,  dense_shape=[N,N])       
-
 
         # Compute the projected gradient of the mountain for test case 5        
         #gradghm= tf.stack(tf.sparse_tensor_dense_matmul(DPx,ghm)/a,\
@@ -327,22 +353,24 @@ with graph.as_default():
         gradghm2 = tf.sparse_tensor_dense_matmul(DPy,ghm)/a
         gradghm3 = tf.sparse_tensor_dense_matmul(DPz,ghm)/a
         gradghm  = tf.concat((gradghm1, gradghm2, gradghm3), axis=1)
-        
+       
+
         U1 = U
         H1 = H
+        d1_u, d1_h = evalCartRhs_fd(U1,H1,DPx,DPy,DPz,L,X,f,g,a,gh0,p_u,p_v,p_w,gradghm,dt)
         
-        d1_u, d1_h =evalCartRhs_fd(U1,H1,DPx,DPy,DPz,L,X,f,g,a,gh0,p_u,p_v,p_w,gradghm,dt)
-        
-        U2 = U + 0.5*d1_u*dt;
-        H2 = H + 0.5*d1_h*dt;
+        U2 = U + 0.5*d1_u*dt
+        H2 = H + 0.5*d1_h*dt
         d2_u, d2_h = evalCartRhs_fd(U2,H2,DPx,DPy,DPz,L,X,f,g,a,gh0,p_u,p_v,p_w,gradghm,dt)
 
-        U3 = U + 0.5*d2_u*dt;
-        H3 = H + 0.5*d2_h*dt;
+        
+        U3 = U + 0.5*d2_u*dt
+        H3 = H + 0.5*d2_h*dt
         d3_u, d3_h = evalCartRhs_fd(U3,H3,DPx,DPy,DPz,L,X,f,g,a,gh0,p_u,p_v,p_w,gradghm,dt)
 
-        U4 = U + d3_u*dt;
-        H4 = H + d3_h*dt;
+
+        U4 = U + d3_u*dt
+        H4 = H + d3_h*dt
         d4_u, d4_h = evalCartRhs_fd(U4,H4,DPx,DPy,DPz,L,X,f,g,a,gh0,p_u,p_v,p_w,gradghm,dt)
         
         U_next = U + 1/6*(d1_u + 2*d2_u + 2*d3_u + d4_u)*dt;
@@ -352,60 +380,60 @@ with graph.as_default():
 
         #loss = tf.abs((tot_en - tf.reduce_sum(0.5*tf.square(U_next) - H_next))/tot_en)
         #loss = tf.square((tot_en - tf.reduce_sum(0.5*tf.square(U_next) - H_next)))
-        t_energy=computeMetricTensor(U_next, H_next)
-        delta= tf.abs(tot_en-t_energy)
-        flag = tf.cast(delta>1.0, tf.float64)
+        t_energy,t_mass=computeMetricTensor(U_next, H_next)
+        delta_en= tf.abs(tot_en-t_energy)
+        #delta_en= tf.abs(t_energy/tot_en)
+        delta_ma= tf.abs(tot_ma-t_mass)
+        #flag = tf.cast(delta_en>1.0, tf.float64)
         #loss = flag*tf.square(delta) +(1-flag) * tf.sqrt(delta)
         #loss = flag*tf.square(delta) +(1-flag) * delta
         #loss = delta ** 4
-        loss = tf.square(delta)
-
+        #loss = tf.square(delta_en+delta_ma)
+        loss = tf.square(delta_en)
+        #loss = tf.abs(delta_en-1)
+        #loss = tf.square(delta_ma)
         #loss = tf.square(tot_en - t_energy)
         #the optimize item is energy conservation
-        # Parameters for md0009
-        #optimizer = tf.train.AdamOptimizer(learning_rate=1e-7, beta1=0.9, beta2=0.999, epsilon=1e-5).minimize(loss)
-        # Parameters for md3600
-        #optimizer = tf.train.AdamOptimizer(learning_rate=1e-7, beta1=0.9, beta2=0.999999, epsilon=1e-8).minimize(loss)
-        optimizer = tf.train.AdamOptimizer(learning_rate=4e-8).minimize(loss)
+        optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, beta1=beta1).minimize(loss)
 
         init = tf.global_variables_initializer()
 
 #=============================Start Session=============================
 with tf.Session(graph=graph) as sess:
     sess.run(init)
-
-    feed_dict_train={ U: uc, H: gh}
-    feed_dict_predict={ U: uc, H: gh}
-    feed_dict_test={ U: uc, H: gh}
     
+    feed_dict_train={ U: uc, H: gh}
+    #feed_dict_predict={ U: uc, H: gh}
+    feed_dict_test={ U: uc, H: gh}
    
     tic()
 
     #for nt in range(tend*24*3600):
-    for nt in range(100):
+    for nt in range(1,1000):
         #=============Train Phase==================
-        for train_step in range(3000):
-            [optimizer_train,delta_train,loss_train,U_train,H_train,value_train] = sess.run([optimizer, delta, loss, U_next, H_next, value], feed_dict= feed_dict_train)
-            #feed_dict_train={ U: uc, H: gh}
-            print("\t>>>train:",train_step, "\tloss_train=",loss_train, "\tdelta_train=",delta_train)
-            if delta_train < 1e-10 :
+        for train_step in range(1,2000):
+            #[optimizer_train,delta_train,loss_train,U_train,H_train,value_train, energy_train,tmp1_train,tmp2_train] = sess.run([optimizer, delta, loss, U_next, H_next, value, t_energy,tmp1,tmp2], feed_dict= feed_dict_train)
+            [optimizer_train,delta_en_train,delta_ma_train,loss_train,U_train,H_train,value_train] = sess.run([optimizer, delta_en, delta_ma, loss, U_next, H_next, value], feed_dict= feed_dict_train)
+            #print(">>>>train:",train_step, "\tloss_train=",loss_train, "\tdelta_en_train=",delta_en_train, "\tdelta_ma_train=",delta_ma_train)
+            #if loss_train < 1e-2:
+            #if loss_train < 1e-8:
+            if loss_train < 1e-1:
                 break
         
         #=============One step prediction==================
-        for train_step in range(3000):
-        [optimizer_predict,delta_predict,loss_predict,U_predict,H_predict,value_predict] = sess.run([optimizer, delta, loss, U_next, H_next, value], feed_dict= feed_dict_predict)
         #[delta_predict,loss_predict,U_predict,H_predict,value_predict] = sess.run([delta, loss, U_next, H_next, value], feed_dict= feed_dict_predict)
-        feed_dict_predict={ U: U_predict, H: H_predict}
-        feed_dict_train=feed_dict_predict
 
-        t_energy = computeMetric(U_predict, H_predict)
-        print("step:",nt, "\tt_energy=",t_energy, "\tloss=",loss_predict, "\tdelta=",delta_predict)
+        feed_dict_train={ U: U_train, H: H_train}
+        print(">>step:",nt, "\ttrain:",train_step, "\tloss=",loss_train, "\tdelta_en=",delta_en_train, "\tdelta_ma=",delta_ma_train)
+
+        #t_energy,t_mass = computeMetric(U_train, H_train)
+        #print(">>step:",nt, "\tt_energy=",t_energy, "\tloss=",loss_train, "\tdelta_en=",delta_en_train, "\tdelta_ma=",delta_ma_train)
     
         # plot the results
         if nplt == 1 and nt % ndsply==0:
                 ax.cla()
-                ax.tricontour(la.reshape(N), th.reshape(N), value_predict.reshape(N), 14, linewidths=0.5, colors='k')
-                cntr  = ax.tricontourf(la.reshape(N), th.reshape(N), value_predict.reshape(N), 14, cmap="RdBu_r")
+                ax.tricontour(la.reshape(N), th.reshape(N), value_train.reshape(N), 14, linewidths=0.5, colors='k')
+                cntr  = ax.tricontourf(la.reshape(N), th.reshape(N), value_train.reshape(N), 14, cmap="RdBu_r")
                 #fig.colorbar(cntr, ax=ax)
                 #ax.plot(la, th, 'ko', ms=3)
                 ax.axis((-np.pi/2, np.pi/2, -np.pi/2, np.pi/2))
