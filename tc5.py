@@ -43,7 +43,7 @@ def setupT5(nfile):
     p_w = np.hstack((-x*z  , -y*z,   1-z**2)) 
    
     X = nfile[:,0:3]
-
+   # P = np.eye(
     # Coriolis force.
     f = 2*omega*(-x*np.sin(alpha) + z*np.cos(alpha))
     
@@ -214,7 +214,8 @@ def evalCartRhs_fd(U,H,DPx,DPy,DPz,L,X,f,g,a,gh0,p_u,p_v,p_w,gradghm,dt):
 
 def computeMetric(Vel, gH):
     global th
-    energy = np.sum(0.5*(Vel**2) - gH)
+    #energy = np.sum(0.5*(Vel**2) - gH)
+    energy = np.sum(-gH*(Vel**2 - gH)/2)
     mass   = np.sum(-gH)
     #mass   = np.sum(-gH*np.cos(th))
     #energy = np.sum((Vel**2 + gH**2)*np.cos(th))
@@ -222,7 +223,8 @@ def computeMetric(Vel, gH):
 
 def computeMetricTensor(Vel, gH):
     global th
-    energy = tf.reduce_sum(0.5*tf.square(Vel) - gH)
+    #energy = tf.reduce_sum(0.5*tf.square(Vel) - gH)
+    energy = tf.reduce_sum(-gh*(Vel**2 - gH)/2)
     mass   = tf.reduce_sum(-gH)
     #mass   = tf.reduce_sum(-gH*np.cos(th))
     #energy = tf.reduce_sum((Vel**2 + gH**2)*np.cos(th))
@@ -395,8 +397,9 @@ with graph.as_default():
         #loss = delta ** 4
         
         #loss = tf.square(delta_en+delta_ma)
-        #loss = tf.square(delta_en)+tf.square(delta_ma)
-        loss = tf.square(delta_en)
+        #loss = tf.square(delta_en)+tf.square(delta_ma)*100
+        loss = tf.square(delta_en)+1000*tf.square(delta_ma)
+        #loss = tf.square(delta_en)
         #loss = tf.abs(delta_en)
         #loss = tf.square(delta_ma)
         #loss = tf.square(tot_en - t_energy)
@@ -416,13 +419,13 @@ with tf.Session(graph=graph) as sess:
     tic()
 
     #for nt in range(tend*24*3600):
-    for nt in range(1,2):
+    for nt in range(1,30):
         #=============Train Phase==================
         for train_step in range(1,300):
             #[optimizer_train,delta_train,loss_train,U_train,H_train,value_train, energy_train,tmp1_train,tmp2_train] = sess.run([optimizer, delta, loss, U_next, H_next, value, t_energy,tmp1,tmp2], feed_dict= feed_dict_train)
             [optimizer_train,delta_en_train,delta_ma_train,loss_train,U_train,H_train,value_train] = sess.run([optimizer, delta_en, delta_ma, loss, U_next, H_next, value], feed_dict= feed_dict_train)
             #print(">>>>train:",train_step, "\tloss_train=",loss_train, "\tdelta_en_train=",delta_en_train, "\tdelta_ma_train=",delta_ma_train)
-            if loss_train < 1e-2:
+            if loss_train < 1e-1:
             #if loss_train < 1e-8:
                 break
         
