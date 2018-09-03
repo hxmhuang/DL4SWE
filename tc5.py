@@ -41,7 +41,9 @@ def setupT5(nfile):
     p_u = np.hstack((1-x**2, -x*y  , -x*z  ))
     p_v = np.hstack((-x*y  , 1-y**2, -y*z  )) 
     p_w = np.hstack((-x*z  , -y*z,   1-z**2)) 
-    
+   
+    X = nfile[:,0:3]
+
     # Coriolis force.
     f = 2*omega*(-x*np.sin(alpha) + z*np.cos(alpha))
     
@@ -211,23 +213,27 @@ def evalCartRhs_fd(U,H,DPx,DPy,DPz,L,X,f,g,a,gh0,p_u,p_v,p_w,gradghm,dt):
     return F_adjust, G_adjust
 
 def computeMetric(Vel, gH):
+    global th
     energy = np.sum(0.5*(Vel**2) - gH)
     mass   = np.sum(-gH)
+    #mass   = np.sum(-gH*np.cos(th))
     #energy = np.sum((Vel**2 + gH**2)*np.cos(th))
     return energy, mass
 
 def computeMetricTensor(Vel, gH):
+    global th
     energy = tf.reduce_sum(0.5*tf.square(Vel) - gH)
     mass   = tf.reduce_sum(-gH)
+    #mass   = tf.reduce_sum(-gH*np.cos(th))
     #energy = tf.reduce_sum((Vel**2 + gH**2)*np.cos(th))
     return energy, mass
 
 #=============================Define Parameters==============================      
 # size of RBF-FD stencil
 fdsize= 0 
-#nfile =np.loadtxt("md/md002.00009")
+nfile =np.loadtxt("md/md002.00009")
 #nfile =np.loadtxt("md/md019.00400")
-nfile  =np.loadtxt("md/md059.03600")
+#nfile  =np.loadtxt("md/md059.03600")
 #nfile =np.loadtxt("md/md079.06400")
 #nfile =np.loadtxt("md/md164.27225")
 N = nfile.shape[0]
@@ -281,7 +287,7 @@ g     = 9.80616
 gh0   = g*5960
 # Set to nplt=1 if you want to plot results at different time-steps.
 ndsply = 1
-nplt   = 1
+nplt   = 0
 
 # Setup tc5 case
 print(">>Setup testcase ...")
@@ -382,15 +388,16 @@ with graph.as_default():
         #loss = tf.square((tot_en - tf.reduce_sum(0.5*tf.square(U_next) - H_next)))
         t_energy,t_mass=computeMetricTensor(U_next, H_next)
         delta_en= tf.abs(tot_en-t_energy)
-        #delta_en= tf.abs(t_energy/tot_en)
         delta_ma= tf.abs(tot_ma-t_mass)
         #flag = tf.cast(delta_en>1.0, tf.float64)
         #loss = flag*tf.square(delta) +(1-flag) * tf.sqrt(delta)
         #loss = flag*tf.square(delta) +(1-flag) * delta
         #loss = delta ** 4
+        
         #loss = tf.square(delta_en+delta_ma)
+        #loss = tf.square(delta_en)+tf.square(delta_ma)
         loss = tf.square(delta_en)
-        #loss = tf.abs(delta_en-1)
+        #loss = tf.abs(delta_en)
         #loss = tf.square(delta_ma)
         #loss = tf.square(tot_en - t_energy)
         #the optimize item is energy conservation
@@ -409,21 +416,22 @@ with tf.Session(graph=graph) as sess:
     tic()
 
     #for nt in range(tend*24*3600):
-    for nt in range(1,1000):
+    for nt in range(1,2):
         #=============Train Phase==================
-        for train_step in range(1,2000):
+        for train_step in range(1,300):
             #[optimizer_train,delta_train,loss_train,U_train,H_train,value_train, energy_train,tmp1_train,tmp2_train] = sess.run([optimizer, delta, loss, U_next, H_next, value, t_energy,tmp1,tmp2], feed_dict= feed_dict_train)
             [optimizer_train,delta_en_train,delta_ma_train,loss_train,U_train,H_train,value_train] = sess.run([optimizer, delta_en, delta_ma, loss, U_next, H_next, value], feed_dict= feed_dict_train)
             #print(">>>>train:",train_step, "\tloss_train=",loss_train, "\tdelta_en_train=",delta_en_train, "\tdelta_ma_train=",delta_ma_train)
-            #if loss_train < 1e-2:
+            if loss_train < 1e-2:
             #if loss_train < 1e-8:
-            if loss_train < 1e-1:
                 break
         
         #=============One step prediction==================
-        #[delta_predict,loss_predict,U_predict,H_predict,value_predict] = sess.run([delta, loss, U_next, H_next, value], feed_dict= feed_dict_predict)
+        #[delta_en_train,delta_ma_train,loss_train,U_train,H_train,value_train] = sess.run([delta_en, delta_ma, loss, U_next, H_next, value], feed_dict= feed_dict_train)
 
         feed_dict_train={ U: U_train, H: H_train}
+        #print(">>step:",nt, "\tloss=",loss_train, "\tdelta_en=",delta_en_train, "\tdelta_ma=",delta_ma_train)
+        t_energy, t_mass = computeMetric(U_train, H_train)
         print(">>step:",nt, "\ttrain:",train_step, "\tloss=",loss_train, "\tdelta_en=",delta_en_train, "\tdelta_ma=",delta_ma_train)
 
         #t_energy,t_mass = computeMetric(U_train, H_train)
