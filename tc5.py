@@ -233,9 +233,9 @@ def computeMetricTensor(Vel, gH):
 #=============================Define Parameters==============================      
 # size of RBF-FD stencil
 fdsize= 0 
-nfile =np.loadtxt("md/md002.00009")
+#nfile =np.loadtxt("md/md002.00009")
 #nfile =np.loadtxt("md/md019.00400")
-#nfile  =np.loadtxt("md/md059.03600")
+nfile  =np.loadtxt("md/md059.03600")
 #nfile =np.loadtxt("md/md079.06400")
 #nfile =np.loadtxt("md/md164.27225")
 N = nfile.shape[0]
@@ -248,18 +248,17 @@ gamma = 0
 
 learning_rate = 0.0 
 beta1 = 0.0
-
+weight = 0.0
 if   N == 9:
-    fdsize = 5 ; gamma = -2.97e-15 ; dt = 2000.0 ; learning_rate = 2e-6 ;  beta1 = 1e-5
+    fdsize = 5 ; gamma = -2.97e-15 ; dt = 2000.0 ; learning_rate = 2e-6 ;  beta1 = 1e-1 ; weight = 1e3
 elif N == 400:
-    fdsize = 31; gamma = -2.97e-15 ; dt = 2000.0 ; learning_rate = 1e-7 ;  beta1 = 1e-5
+    fdsize = 31; gamma = -2.97e-15 ; dt = 2000.0 ; learning_rate = 1e-7 ;  beta1 = 1e-1 ; weight = 1e3
 elif N == 3600:
-    #fdsize = 31; gamma = -2.97e-15 ; dt = 2000.0 ; learning_rate = 1e-7 ;  beta1 = 1e-5
-    fdsize = 31; gamma = -2.97e-15 ; dt = 2000.0 ; learning_rate = 1e-7 ;  beta1 = 1e-5
+    fdsize = 31; gamma = -2.97e-16 ; dt = 2000.0 ; learning_rate = 1e-7 ;  beta1 = 1e-1 ; weight = 1e3
 elif N == 4900:
-    fdsize = 31; gamma = -2.97e-15 ; dt = 1000.0 ; learning_rate = 1e-7 ;  beta1 = 1e-5
+    fdsize = 31; gamma = -2.97e-15 ; dt = 1000.0 ; learning_rate = 1e-7 ;  beta1 = 1e-1 ; weight = 1e3
 elif N == 6400:
-    fdsize = 31; gamma = -2.97e-16 ; dt = 1000.0 ; learning_rate = 1e-7 ;  beta1 = 1e-5
+    fdsize = 31; gamma = -2.97e-16 ; dt = 1000.0 ; learning_rate = 1e-7 ;  beta1 = 1e-1 ; weight = 1e3
 
 # ending time, needs to be in days
 tend  = 1
@@ -342,6 +341,7 @@ with graph.as_default():
         dt      = tf.constant(dt, dtype=tf.float64, name="dt")
         learning_rate= tf.constant(learning_rate, dtype=tf.float64, name="learning_rate")
         beta1   = tf.constant(beta1, dtype=tf.float64, name="beta1")
+        weight  = tf.constant(weight, dtype=tf.float64, name="weight4loss")
 
 
         #dt      = tf.Variable(dt, dtype=tf.float64, name="dt")
@@ -398,7 +398,12 @@ with graph.as_default():
         
         #loss = tf.square(delta_en+delta_ma)
         #loss = tf.square(delta_en)+tf.square(delta_ma)*100
-        loss = tf.square(delta_en)+1000*tf.square(delta_ma)
+        #loss = tf.square(delta_en)+100000*tf.square(delta_ma)
+        #weight = tot_en/tot_ma
+        loss = tf.square(delta_en)+tf.square(weight*delta_ma)
+        #loss = tf.square(delta_en+weight*delta_ma)
+        #loss = tf.square(delta_en)+tf.square(delta_ma)
+        #loss = tf.square(delta_en)
         #loss = tf.square(delta_en)
         #loss = tf.abs(delta_en)
         #loss = tf.square(delta_ma)
@@ -415,20 +420,22 @@ with tf.Session(graph=graph) as sess:
     feed_dict_train={ U: uc, H: gh}
     #feed_dict_predict={ U: uc, H: gh}
     feed_dict_test={ U: uc, H: gh}
-   
+  
+    U_train = uc
+    H_train = gh
     tic()
 
     #for nt in range(tend*24*3600):
-    for nt in range(1,30):
+    for nt in range(1,100):
         #=============Train Phase==================
-        for train_step in range(1,300):
-            #[optimizer_train,delta_train,loss_train,U_train,H_train,value_train, energy_train,tmp1_train,tmp2_train] = sess.run([optimizer, delta, loss, U_next, H_next, value, t_energy,tmp1,tmp2], feed_dict= feed_dict_train)
+        for train_step in range(1,500):
             [optimizer_train,delta_en_train,delta_ma_train,loss_train,U_train,H_train,value_train] = sess.run([optimizer, delta_en, delta_ma, loss, U_next, H_next, value], feed_dict= feed_dict_train)
-            #print(">>>>train:",train_step, "\tloss_train=",loss_train, "\tdelta_en_train=",delta_en_train, "\tdelta_ma_train=",delta_ma_train)
-            if loss_train < 1e-1:
-            #if loss_train < 1e-8:
+            #print(">>>>en_train:",train_step, "\tloss_train=",loss_train, "\tdelta_en_train=",delta_en_train, "\tdelta_ma_train=",delta_ma_train)
+            #if loss_train < 2e-2:
+            #if loss_train < 2e-2:
+            if delta_en_train < 1e0 and delta_ma_train < 1e0:
                 break
-        
+       
         #=============One step prediction==================
         #[delta_en_train,delta_ma_train,loss_train,U_train,H_train,value_train] = sess.run([delta_en, delta_ma, loss, U_next, H_next, value], feed_dict= feed_dict_train)
 
