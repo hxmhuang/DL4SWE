@@ -149,16 +149,16 @@ def computeInitialCondition(nfile):
 # Evaluates the RHS (spatial derivatives) for the Cartesian RBF formulation of the shallow water equations with projected gradients.
 # This function applies to Test Case 5, which contains the forcing of the mountain
 def evalCartRhs_fd(U,H,DPx,DPy,DPz,L,X,f,g,a,gh0,p_u,p_v,p_w,gradghm,dt):
-    Ux = tf.sparse_tensor_dense_matmul(DPx,U)/a
-    Uy = tf.sparse_tensor_dense_matmul(DPy,U)/a
-    Uz = tf.sparse_tensor_dense_matmul(DPz,U)/a
-    Hx = tf.sparse_tensor_dense_matmul(DPx,H)/a
-    Hy = tf.sparse_tensor_dense_matmul(DPy,H)/a
-    Hz = tf.sparse_tensor_dense_matmul(DPz,H)/a    
+    Ux = tf.sparse.sparse_dense_matmul(DPx,U)/a
+    Uy = tf.sparse.sparse_dense_matmul(DPy,U)/a
+    Uz = tf.sparse.sparse_dense_matmul(DPz,U)/a
+    Hx = tf.sparse.sparse_dense_matmul(DPx,H)/a
+    Hy = tf.sparse.sparse_dense_matmul(DPy,H)/a
+    Hz = tf.sparse.sparse_dense_matmul(DPz,H)/a    
     
     U_ = tf.stack((Ux,Uy,Uz),axis=0)
     H_ = tf.concat((Hx,Hy,Hz),axis=1) 
-    RHS= -(tf.einsum('ik,kij->ij', U, U_) + f*tf.cross(X,U) + H_)
+    RHS= -(tf.einsum('ik,kij->ij', U, U_) + f*tf.linalg.cross(X,U) + H_)
 
     # Project the momentum equations onto the surface of the sphere.
     #p=RHS[:,0]; q=RHS[:,1] ; s=RHS[:,2]
@@ -186,8 +186,8 @@ def evalCartRhs_fd(U,H,DPx,DPy,DPz,L,X,f,g,a,gh0,p_u,p_v,p_w,gradghm,dt):
     G = -(G1+G2)
     
     # Still have some precision problem
-    F_adjust = F + tf.sparse_tensor_dense_matmul(L, U)
-    G_adjust = G + tf.sparse_tensor_dense_matmul(L, H)
+    F_adjust = F + tf.sparse.sparse_dense_matmul(L, U)
+    G_adjust = G + tf.sparse.sparse_dense_matmul(L, H)
     
     #return F, tf.sparse_tensor_dense_matmul(L, U)
     return F_adjust, G_adjust
@@ -203,9 +203,9 @@ def computeMetric(Vel, gH, X):
 def computeMetricTensor(Vel, gH, X):
     #global th
     #energy = tf.reduce_sum(0.5*tf.square(Vel) - gH)
-    energy = tf.reduce_sum(-gh*(Vel**2 - gH)/2)
-    mass   = tf.reduce_sum(-gH)
-    angmom = tf.reduce_sum(tf.cross(X, mass*Vel))
+    energy = tf.reduce_sum(input_tensor=-gh*(Vel**2 - gH)/2)
+    mass   = tf.reduce_sum(input_tensor=-gH)
+    angmom = tf.reduce_sum(input_tensor=tf.linalg.cross(X, mass*Vel))
     return energy, mass, angmom
 
 #=============================Define Parameters==============================      
@@ -294,9 +294,9 @@ if nplt == 1:
 #=============================Define Graph=============================
 graph = tf.Graph()
 with graph.as_default():
-    with tf.name_scope("Input"):   
-        U       = tf.placeholder(dtype=tf.float64, shape=(N,3), name="U")
-        H       = tf.placeholder(dtype=tf.float64, shape=(N,1), name="H")
+    with tf.compat.v1.name_scope("Input"):   
+        U       = tf.compat.v1.placeholder(dtype=tf.float64, shape=(N,3), name="U")
+        H       = tf.compat.v1.placeholder(dtype=tf.float64, shape=(N,1), name="H")
         
         X       = tf.constant(nfile[:,0:3], shape=(N,3), dtype=tf.float64, name="X")        
         f       = tf.constant(f, dtype=tf.float64, name="f")
@@ -333,9 +333,9 @@ with graph.as_default():
         #gradghm= tf.stack(tf.sparse_tensor_dense_matmul(DPx,ghm)/a,\
         #                  tf.sparse_tensor_dense_matmul(DPy,ghm)/a,\
         #                  tf.sparse_tensor_dense_matmul(DPz,ghm)/a)   
-        gradghm1 = tf.sparse_tensor_dense_matmul(DPx,ghm)/a
-        gradghm2 = tf.sparse_tensor_dense_matmul(DPy,ghm)/a
-        gradghm3 = tf.sparse_tensor_dense_matmul(DPz,ghm)/a
+        gradghm1 = tf.sparse.sparse_dense_matmul(DPx,ghm)/a
+        gradghm2 = tf.sparse.sparse_dense_matmul(DPy,ghm)/a
+        gradghm3 = tf.sparse.sparse_dense_matmul(DPz,ghm)/a
         gradghm  = tf.concat((gradghm1, gradghm2, gradghm3), axis=1)
        
 
@@ -368,12 +368,12 @@ with graph.as_default():
         #loss = delta_en**2+weight1*(delta_ma**2)
         loss = delta_en**2
         #the optimize item is energy conservation
-        optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, beta1=beta1).minimize(loss)
+        optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=learning_rate, beta1=beta1).minimize(loss)
         #optimizer = tf.train.AdadeltaOptimizer(learning_rate=0.001, rho=0.99, epsilon=1e-08, use_locking=False).minimize(loss)
-        init = tf.global_variables_initializer()
+        init = tf.compat.v1.global_variables_initializer()
 
 #=============================Start Session=============================
-with tf.Session(graph=graph) as sess:
+with tf.compat.v1.Session(graph=graph) as sess:
     sess.run(init)
     
     feed_dict_train={ U: uc, H: gh}
